@@ -80,4 +80,3 @@ jobs:
           name: Exerpia-Wallet-AAB
           path: android-source/**/build/outputs/bundle/release/*.aab
           if-no-files-found: error
-
