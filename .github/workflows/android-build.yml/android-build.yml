@@ -4,79 +4,36 @@ name: Exerpia Wallet Android Build
 on:
   workflow_dispatch:
   push:
-    branches:
-      - main
+    branches: [main]
 
 jobs:
   build:
     runs-on: ubuntu-latest
-
     steps:
-      - name: Checkout repository
-        uses: actions/checkout@v4
+      - uses: actions/checkout@v4
 
-      - name: Set up Java 17
-        uses: actions/setup-java@v4
+      - uses: actions/setup-java@v4
         with:
           distribution: temurin
           java-version: '17'
 
-      - name: Set up Android SDK
-        uses: android-actions/setup-android@v3
-
-      - name: Install Gradle
-        uses: gradle/actions/setup-gradle@v4
+      - uses: gradle/actions/setup-gradle@v4
         with:
           gradle-version: '8.9'
 
-      - name: Extract Android project
+      - name: Extract source
         run: |
           unzip ExerpiaWalletAndroid_Source.zip -d android-project
+          find android-project -name build.gradle.kts
+
+      - name: Build bundle
+        run: |
           cd android-project
           gradle bundleRelease
 
-      - name: Upload Android App Bundle
+      - name: Upload AAB
         uses: actions/upload-artifact@v4
         with:
           name: exerpia-wallet-aab
-          path: android-project/app/build/outputs/bundle/release/*.aab
-          if-no-files-found: error
-
-name: Exerpia Wallet Android Build
-
-on:
-  workflow_dispatch:
-  push:
-    branches:
-      - main
-
-jobs:
-  build:
-    runs-on: ubuntu-latest
-    steps:
-      - name: Download repository
-        uses: actions/checkout@v4
-
-      - name: Set up Java 17
-        uses: actions/setup-java@v4
-        with:
-          distribution: temurin
-          java-version: '17'
-
-      - name: Extract source project
-        run: |
-          mkdir android-source
-          unzip ExerpiaWalletAndroid_Source.zip -d android-source
-          find android-source -name build.gradle.kts
-
-      - name: Build release bundle
-        run: |
-          cd android-source
-          gradle bundleRelease
-
-      - name: Save AAB
-        uses: actions/upload-artifact@v4
-        with:
-          name: Exerpia-Wallet-AAB
-          path: android-source/**/build/outputs/bundle/release/*.aab
+          path: android-project/**/build/outputs/bundle/release/*.aab
           if-no-files-found: error
