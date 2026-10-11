@@ -27,9 +27,7 @@ jobs:
           gradle-version: '8.9'
 
       - name: Extract Android project
-        run: |
-          unzip -o ExerpiaWalletAndroid_Source.zip -d android-project
-          find android-project -name settings.gradle.kts
+        run: unzip -o ExerpiaWalletAndroid_Source.zip -d android-project
 
       - name: Build Android App Bundle
         run: |
@@ -37,9 +35,10 @@ jobs:
           cd "$PROJECT_DIR"
           gradle bundleRelease
 
-      - name: Save AAB file
-        uses: actions/upload-artifact@v4
-        with:
-          name: exerpia-wallet-aab
-          path: android-project/**/build/outputs/bundle/release/*.aab
-          if-no-files-found: error
+      - name: Sign Android App Bundle
+        env:
+          KEYSTORE_PASSWORD: ${{ secrets.KEYSTORE_PASSWORD }}
+          KEY_PASSWORD: ${{ secrets.KEY_PASSWORD }}
+        run: |
+          echo "Signing key file is not configured yet."
+          exit 1
