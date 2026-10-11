@@ -1,0 +1,45 @@
+
+name: Exerpia Wallet Android Build
+
+on:
+  workflow_dispatch:
+  push:
+    branches:
+      - main
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Get source code
+        uses: actions/checkout@v4
+
+      - name: Install Java
+        uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: '17'
+
+      - name: Install Gradle
+        uses: gradle/actions/setup-gradle@v4
+        with:
+          gradle-version: '8.9'
+
+      - name: Extract Android project
+        run: |
+          unzip -o ExerpiaWalletAndroid_Source.zip -d android-project
+          find android-project -name settings.gradle.kts
+
+      - name: Build Android App Bundle
+        run: |
+          PROJECT_DIR="$(dirname "$(find android-project -name settings.gradle.kts -print -quit)")"
+          cd "$PROJECT_DIR"
+          gradle bundleRelease
+
+      - name: Save AAB file
+        uses: actions/upload-artifact@v4
+        with:
+          name: exerpia-wallet-aab
+          path: android-project/**/build/outputs/bundle/release/*.aab
+          if-no-files-found: error
