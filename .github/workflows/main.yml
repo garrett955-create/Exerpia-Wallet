@@ -1,5 +1,4 @@
-
-name: Exerpia Wallet Android Build
+name: Exerpia Wallet Signed Android Build
 
 on:
   workflow_dispatch:
@@ -29,16 +28,38 @@ jobs:
       - name: Extract Android project
         run: unzip -o ExerpiaWalletAndroid_Source.zip -d android-project
 
-      - name: Build Android App Bundle
-        run: |
-          PROJECT_DIR="$(dirname "$(find android-project -name settings.gradle.kts -print -quit)")"
-          cd "$PROJECT_DIR"
-          gradle bundleRelease
-
-      - name: Sign Android App Bundle
+      - name: Build and sign Android App Bundle
         env:
+          KEYSTORE_BASE64: ${{ secrets.UPLOAD_KEYSTORE_BASE64 }}
           KEYSTORE_PASSWORD: ${{ secrets.KEYSTORE_PASSWORD }}
           KEY_PASSWORD: ${{ secrets.KEY_PASSWORD }}
         run: |
-          echo "Signing key file is not configured yet."
-          exit 1
+          set -e
+
+          if [ -z "$KEYSTORE_BASE64" ]; then
+            echo "Missing GitHub secret: UPLOAD_KEYSTORE_BASE64"
+            exit 1
+          fi
+
+          PROJECT_DIR="$(dirname "$(find android-project -name settings.gradle.kts -print -quit)")"
+          cd "$PROJECT_DIR"
+
+          echo "$KEYSTORE_BASE64" | base64 --decode > "$RUNNER_TEMP/upload-key.jks"
+
+          gradle bundleRelease
+
+          jarsigner \
+            -keystore "$RUNNER_TEMP/upload-key.jks" \
+            -storepass "$KEYSTORE_PASSWORD" \
+            -keypass "$KEY_PASSWORD" \
+            app/build/outputs/bundle/release/app-release.aab \
+            exerpia-upload
+
+          jarsigner -verify app/build/outputs/bundle/release/app-release.aab
+
+      - name: Save signed AAB
+        uses: actions/upload-artifact@v4
+        with:
+          name: exerpia-wallet-signed-aab
+          path: android-project/**/build/outputs/bundle/release/*.aab
+          if-no-files-found: error
