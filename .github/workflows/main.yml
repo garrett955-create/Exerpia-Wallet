@@ -46,7 +46,7 @@ jobs:
           unzip -o ExerpiaWalletAndroid_Source.zip -d android-project
           test -f android-project/settings.gradle.kts
 
-      - name: Build and sign Android App Bundle
+      - name: Build Android App Bundle
         env:
           KEYSTORE_BASE64: ${{ secrets.UPLOAD_KEYSTORE_BASE64 }}
           KEYSTORE_PASSWORD: ${{ secrets.KEYSTORE_PASSWORD }}
