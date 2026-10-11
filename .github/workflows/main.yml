@@ -1,3 +1,4 @@
+
 name: Exerpia Wallet Signed Android Build
 
 on:
@@ -5,6 +6,9 @@ on:
   push:
     branches:
       - main
+
+permissions:
+  contents: read
 
 jobs:
   build:
@@ -25,8 +29,22 @@ jobs:
         with:
           gradle-version: '8.9'
 
+      - name: Check signing secrets
+        env:
+          KEYSTORE_BASE64: ${{ secrets.UPLOAD_KEYSTORE_BASE64 }}
+          KEYSTORE_PASSWORD: ${{ secrets.KEYSTORE_PASSWORD }}
+          KEY_PASSWORD: ${{ secrets.KEY_PASSWORD }}
+        run: |
+          set -eu
+          test -n "$KEYSTORE_BASE64" || { echo "Missing UPLOAD_KEYSTORE_BASE64 secret"; exit 1; }
+          test -n "$KEYSTORE_PASSWORD" || { echo "Missing KEYSTORE_PASSWORD secret"; exit 1; }
+          test -n "$KEY_PASSWORD" || { echo "Missing KEY_PASSWORD secret"; exit 1; }
+
       - name: Extract Android project
-        run: unzip -o ExerpiaWalletAndroid_Source.zip -d android-project
+        run: |
+          set -eu
+          unzip -o ExerpiaWalletAndroid_Source.zip -d android-project
+          test -f android-project/settings.gradle.kts
 
       - name: Build and sign Android App Bundle
         env:
@@ -34,32 +52,37 @@ jobs:
           KEYSTORE_PASSWORD: ${{ secrets.KEYSTORE_PASSWORD }}
           KEY_PASSWORD: ${{ secrets.KEY_PASSWORD }}
         run: |
-          set -e
+          set -eu
 
-          if [ -z "$KEYSTORE_BASE64" ]; then
-            echo "Missing GitHub secret: UPLOAD_KEYSTORE_BASE64"
-            exit 1
-          fi
+          printf '%s' "$KEYSTORE_BASE64" | base64 --decode > "$RUNNER_TEMP/upload-key.jks"
 
-          PROJECT_DIR="$(dirname "$(find android-project -name settings.gradle.kts -print -quit)")"
-          cd "$PROJECT_DIR"
+          keytool -list \
+            -keystore "$RUNNER_TEMP/upload-key.jks" \
+            -storepass "$KEYSTORE_PASSWORD" \
+            -alias exerpia-upload
 
-          echo "$KEYSTORE_BASE64" | base64 --decode > "$RUNNER_TEMP/upload-key.jks"
-
+          cd android-project
           gradle bundleRelease
+
+          AAB="app/build/outputs/bundle/release/app-release.aab"
+          test -f "$AAB"
 
           jarsigner \
             -keystore "$RUNNER_TEMP/upload-key.jks" \
             -storepass "$KEYSTORE_PASSWORD" \
             -keypass "$KEY_PASSWORD" \
-            app/build/outputs/bundle/release/app-release.aab \
+            "$AAB" \
             exerpia-upload
 
-          jarsigner -verify app/build/outputs/bundle/release/app-release.aab
+          jarsigner -verify "$AAB"
 
-      - name: Save signed AAB
+          mkdir -p "$GITHUB_WORKSPACE/output"
+          cp "$AAB" "$GITHUB_WORKSPACE/output/exerpia-wallet-signed.aab"
+
+      - name: Upload signed Android App Bundle
         uses: actions/upload-artifact@v4
         with:
           name: exerpia-wallet-signed-aab
-          path: android-project/**/build/outputs/bundle/release/*.aab
+          path: output/exerpia-wallet-signed.aab
           if-no-files-found: error
+          retention-days: 7
