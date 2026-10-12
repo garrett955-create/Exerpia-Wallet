@@ -30,29 +30,72 @@ jobs:
           gradle-version: '8.9'
 
       - name: Check signing secrets
-        env:
-          UPLOAD_KEYSTORE_BASE64: ${{ secrets.UPLOAD_KEYSTORE_BASE64 }}
-          KEYSTORE_PASSWORD: ${{ secrets.KEYSTORE_PASSWORD }}
-          KEY_PASSWORD: ${{ secrets.KEY_PASSWORD }}
-        run: |
-          set -eu
-          test -n "$KEYSTORE_BASE64" || { echo "Missing UPLOAD_KEYSTORE_BASE64 secret"; exit 1; }
-          test -n "$KEYSTORE_PASSWORD" || { echo "Missing KEYSTORE_PASSWORD secret"; exit 1; }
-          test -n "$KEY_PASSWORD" || { echo "Missing KEY_PASSWORD secret"; exit 1; }
-
-      - name: Extract Android project
-        run: |
-          set -eu
-          unzip -o ExerpiaWalletAndroid_Source.zip -d android-project
-          test -f android-project/settings.gradle.kts
-
-      - name: Build Android App Bundle
+        shell: bash
         env:
           KEYSTORE_BASE64: ${{ secrets.UPLOAD_KEYSTORE_BASE64 }}
           KEYSTORE_PASSWORD: ${{ secrets.KEYSTORE_PASSWORD }}
           KEY_PASSWORD: ${{ secrets.KEY_PASSWORD }}
         run: |
-          set -eu
+          set -euo pipefail
+
+          if [[ -z "$KEYSTORE_BASE64" ]]; then
+            echo "::error::Missing repository secret UPLOAD_KEYSTORE_BASE64"
+            exit 1
+          fi
+
+          if [[ -z "$KEYSTORE_PASSWORD" ]]; then
+            echo "::error::Missing repository secret KEYSTORE_PASSWORD"
+            exit 1
+          fi
+
+          if [[ -z "$KEY_PASSWORD" ]]; then
+            echo "::error::Missing repository secret KEY_PASSWORD"
+            exit 1
+          fi
+
+          echo "All signing secrets are present."
+
+      - name: Locate and extract Android project
+        shell: bash
+        run: |
+          set -euo pipefail
+
+          ZIP="ExerpiaWalletAndroid_Source.zip"
+
+          if [[ ! -f "$ZIP" ]]; then
+            echo "::error::ExerpiaWalletAndroid_Source.zip was not found in the repository root."
+            exit 1
+          fi
+
+          mkdir -p android-project
+          unzip -o "$ZIP" -d android-project
+
+          SETTINGS_FILE=$(find android-project -type f \( -name settings.gradle.kts -o -name settings.gradle \) -print -quit)
+
+          if [[ -z "$SETTINGS_FILE" ]]; then
+            echo "::error::No Gradle settings file found inside the ZIP."
+            find android-project -maxdepth 5 -type f | head -100
+            exit 1
+          fi
+
+          PROJECT_DIR="$(dirname "$SETTINGS_FILE")"
+
+          if [[ ! -f "$PROJECT_DIR/gradlew" && ! -f "$PROJECT_DIR/app/build.gradle" && ! -f "$PROJECT_DIR/app/build.gradle.kts" ]]; then
+            echo "::error::Could not identify the Android application module."
+            find android-project -maxdepth 5 -type f | head -100
+            exit 1
+          fi
+
+          echo "ANDROID_PROJECT_DIR=$PROJECT_DIR" >> "$GITHUB_ENV"
+          echo "Android project found at: $PROJECT_DIR"
+
+      - name: Prepare signing keystore
+        shell: bash
+        env:
+          KEYSTORE_BASE64: ${{ secrets.UPLOAD_KEYSTORE_BASE64 }}
+          KEYSTORE_PASSWORD: ${{ secrets.KEYSTORE_PASSWORD }}
+        run: |
+          set -euo pipefail
 
           printf '%s' "$KEYSTORE_BASE64" | base64 --decode > "$RUNNER_TEMP/upload-key.jks"
 
@@ -61,11 +104,40 @@ jobs:
             -storepass "$KEYSTORE_PASSWORD" \
             -alias exerpia-upload
 
-          cd android-project
-          gradle bundleRelease
+      - name: Build Android App Bundle
+        shell: bash
+        run: |
+          set -euo pipefail
 
-          AAB="app/build/outputs/bundle/release/app-release.aab"
-          test -f "$AAB"
+          cd "$ANDROID_PROJECT_DIR"
+
+          if [[ -f "./gradlew" ]]; then
+            chmod +x ./gradlew
+            ./gradlew bundleRelease
+          else
+            gradle bundleRelease
+          fi
+
+          AAB=$(find . -type f -path '*/build/outputs/bundle/release/*.aab' -print -quit)
+
+          if [[ -z "$AAB" ]]; then
+            echo "::error::No release AAB was generated."
+            find . -type f -name "*.aab" -print
+            exit 1
+          fi
+
+          mkdir -p "$GITHUB_WORKSPACE/output"
+          cp "$AAB" "$GITHUB_WORKSPACE/output/exerpia-wallet-unsigned.aab"
+
+      - name: Sign Android App Bundle
+        shell: bash
+        env:
+          KEYSTORE_PASSWORD: ${{ secrets.KEYSTORE_PASSWORD }}
+          KEY_PASSWORD: ${{ secrets.KEY_PASSWORD }}
+        run: |
+          set -euo pipefail
+
+          AAB="$GITHUB_WORKSPACE/output/exerpia-wallet-unsigned.aab"
 
           jarsigner \
             -keystore "$RUNNER_TEMP/upload-key.jks" \
@@ -76,8 +148,9 @@ jobs:
 
           jarsigner -verify "$AAB"
 
-          mkdir -p "$GITHUB_WORKSPACE/output"
-          cp "$AAB" "$GITHUB_WORKSPACE/output/exerpia-wallet-signed.aab"
+          mv "$AAB" "$GITHUB_WORKSPACE/output/exerpia-wallet-signed.aab"
+
+          echo "Signed AAB created and verified."
 
       - name: Upload signed Android App Bundle
         uses: actions/upload-artifact@v4
@@ -86,3 +159,4 @@ jobs:
           path: output/exerpia-wallet-signed.aab
           if-no-files-found: error
           retention-days: 7
+          
